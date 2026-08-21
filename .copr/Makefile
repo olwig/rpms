@@ -1,3 +1,5 @@
+SHELL := /bin/bash
+
 srpm:
 	dnf -y install rpm-build spectool
 	spectool -g -C $(outdir) $(spec)
