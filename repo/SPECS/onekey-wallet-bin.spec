@@ -6,16 +6,19 @@ Summary:        Secure, open-source crypto wallet based on Electron (prebuilt Ap
 License:        Apache-2.0
 URL:            https://onekey.so/
 
-# fix architecture
+# sources
+Source0:        https://github.com/OneKeyHQ/app-monorepo/releases/download/v%{version}/OneKey-Wallet-%{version}-linux-arm64.AppImage
+Source1:        https://github.com/OneKeyHQ/app-monorepo/releases/download/v%{version}/OneKey-Wallet-%{version}-linux-arm64.AppImage.SHA256SUMS.asc
+Source2:        https://github.com/OneKeyHQ/app-monorepo/releases/download/v%{version}/OneKey-Wallet-%{version}-linux-x86_64.AppImage
+Source3:        https://github.com/OneKeyHQ/app-monorepo/releases/download/v%{version}/OneKey-Wallet-%{version}-linux-x86_64.AppImage.SHA256SUMS.asc
+
 %ifarch aarch64
-    %global target arm64
+    %global src_appimage %{SOURCE0}
+    %global src_asc %{SOURCE1}
 %else
-    %global target %{_target_cpu}
+    %global src_appimage %{SOURCE2}
+    %global src_asc %{SOURCE3}
 %endif
-
-Source0:        https://github.com/OneKeyHQ/app-monorepo/releases/download/v%{version}/OneKey-Wallet-%{version}-linux-%{target}.AppImage
-Source1:        https://github.com/OneKeyHQ/app-monorepo/releases/download/v%{version}/OneKey-Wallet-%{version}-linux-%{target}.AppImage.SHA256SUMS.asc
-
 
 BuildRequires: curl
 BuildRequires: coreutils
@@ -26,6 +29,7 @@ BuildRequires: gnupg2
 BuildRequires: sed
 BuildRequires: zlib
 
+# TODO check upstream which are also present
 ExclusiveArch: aarch64 x86_64
 
 
@@ -43,24 +47,24 @@ Secure, open source and community-driven crypto wallet. This version uses the of
 %prep
 
 # make AppImage available for sha256sum
-cp %{SOURCE0} .
+cp %{src_appimage} .
 
 # validate data
 gpg --keyserver keys.openpgp.org --recv-keys EB68AE544F1FDD8CD264624FB369A67A90BF387B
-gpg --decrypt "%{SOURCE1}" > "%{SOURCE0}.SHA256SUMS"
+gpg --decrypt "%{src_asc}" > "%{src_appimage}.SHA256SUMS"
 if [ $? -ne 0 ]; then
     echo "GPG validation failed!"
     exit 1
 fi
-sha256sum --check "%{SOURCE0}.SHA256SUMS" 
+sha256sum --check "%{src_appimage}.SHA256SUMS" 
 if [ $? -ne 0 ]; then
     echo "Checksum validation failed!"
     exit 1
 fi
 
 # extract image
-chmod +x %{SOURCE0}
-%{SOURCE0} --appimage-extract > /dev/null
+chmod +x %{src_appimage}
+%{src_appimage} --appimage-extract > /dev/null
 mv squashfs-root appdir
 
 # prepare js source files
