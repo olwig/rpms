@@ -1,27 +1,23 @@
 FROM registry.fedoraproject.org/fedora:44
 
-# install basics
 RUN dnf -y install mock rpm-build dnf-plugins-core rpmdevtools nano diffutils colordiff fish make
 RUN dnf -y clean all
 
-# speed up dnf
-#RUN bash -lc "cat >> /etc/dnf/dnf.conf <<'EOF'\n\
-#[main]\n\
-#max_parallel_downloads=10\n\#
-#fastestmirror=True\n\
-#EOF"
-#RUN printf "[main]\nmax_parallel_downloads=10\nfastestmirror=True\n" \
-#    >/etc/dnf/dnf.conf
+RUN cat >> /etc/dnf/dnf.conf <<-'EOF'
+	[main]
+	max_parallel_downloads=10
+	fastestmirror=True
+EOF
 
-#RUN bash -lc "cat >> /etc/mock/site-defaults.cfg <<'EOF'\n\
-#config_opts['use_nspawn'] = False\n\
-#config_opts['isolation']  = 'simple'\n\
-#config_opts['use_bootstrap_image'] = True\n\
-#config_opts['plugin_conf']['root_cache_enable'] = True\n\
-#config_opts['plugin_conf']['yum_cache_enable']  = True\n\
-#config_opts['resultdir'] = '/work/out'\n\
-#config_opts['macros']['%_smp_mflags'] = '-j%{?_smp_build_ncpus}'\n\
-#EOF
+RUN cat >> /etc/mock/site-defaults.cfg <<-'EOF'
+	config_opts['use_nspawn'] = False
+	config_opts['isolation']  = 'simple'
+	config_opts['use_bootstrap_image'] = True
+	config_opts['plugin_conf']['root_cache_enable'] = True
+	config_opts['plugin_conf']['yum_cache_enable']  = True
+	config_opts['resultdir'] = '/work/out'
+	config_opts['macros']['%_smp_mflags'] = '-j%{?_smp_build_ncpus}'
+EOF
 
 WORKDIR /work
 
