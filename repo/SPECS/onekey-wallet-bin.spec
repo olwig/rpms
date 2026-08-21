@@ -1,5 +1,5 @@
 Name:           onekey-wallet-bin
-Version:        6.0.0
+Version:        6.1.0
 Release:        1%{?dist}
 Summary:        Secure, open-source crypto wallet based on Electron (prebuilt AppImage)
 
@@ -64,11 +64,12 @@ chmod +x %{SOURCE0}
 mv squashfs-root appdir
 
 # prepare js source files
-npm install asar
 find "appdir/resources" -type d -exec chmod 755 {} +
-./node_modules/.bin/asar e appdir/resources/app.asar app.asar.unpacked
+# TODO: Remove workaround, suppress errors. Extraction would fail because app.asar
+# contains references to missing unpacked files. This must be fixed upstream.
+npx -y @electron/asar e appdir/resources/app.asar app.asar.unpacked || true
 find app.asar.unpacked/dist/ -type f -exec sed -i "s|process.resourcesPath|'\/usr\/lib\/%{_name}\/resources'|g" {} +
-./node_modules/.bin/asar p app.asar.unpacked appdir/resources/app.asar
+npx -y @electron/asar p app.asar.unpacked appdir/resources/app.asar
 
 # prepare AppRun script
 sed -i 's|APPDIR="\$path"|APPDIR=/usr/lib/%{_name}|' appdir/AppRun
@@ -112,6 +113,12 @@ fi
 /usr/share/icons/hicolor/512x512/apps/%{_name}.png
 
 %changelog
+* Sat Mar 21 2026 Olaf Wriggers <olaf@olwig.xyz> - 6.1.0-1
+- Update to v6.1.0
+- Suppress app.asar extraction errors due to missing unpacked files (upstream packaging issue)
+- Replace asar (depricated) with @electron/asar
+- Use npx instead of npm
+
 * Sat Mar 21 2026 Olaf Wriggers <olaf@olwig.xyz> - 6.0.0-1
 - Update to v6.0.0
 
