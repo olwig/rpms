@@ -27,7 +27,7 @@ BuildRequires: nodejs
 BuildRequires: npm
 BuildRequires: gnupg2
 BuildRequires: sed
-BuildRequires: zlib
+BuildRequires: zlib-ng-compat-devel
 
 # TODO check upstream which are also present
 ExclusiveArch: aarch64 x86_64
