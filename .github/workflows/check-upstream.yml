@@ -1,0 +1,66 @@
+# workflow that checks the upstream version for each packet+
+
+name: check-upstream
+
+on:
+  schedule:
+    - cron: '11 */6 * * *' # every day at midnight
+
+  workflow_dispatch:
+
+jobs:
+  onkey-wallet-bin:
+    runs-on: ubuntu-latest
+
+    env:
+      has_update: false
+      upstream_version: ""
+      latest_release: ""
+
+    steps:
+
+        - name: Checkout repository
+          uses: actions/checkout@v3
+          with:
+              ref: main
+              path: .
+        - name: Check latest release
+          run: |
+            # get lastest release of onekey-wallet
+
+            owner="OneKeyHQ"
+            repo="app-monorepo"
+            pkg_name="onekey-wallet-bin"
+
+            #latest_release=$(curl https://api.github.com/repos/$owner/$repo/releases/latest | jq -r '.name')
+            latest_release="6.6.0"
+            echo "Latest release of $pkg_name: $latest_release"
+
+            # get current version of onekey-wallet in the repo
+            current_version=$(awk '/^Version:/ {print $2}' repo/SPECS/$pkg_name.spec)
+            echo "Current version of $pkg_name in the repo: $current_version"
+
+            # compare versions
+            if [[ "$(echo -e "$latest_release\n$current_version" | sort -V | head -n1)" == "$latest_release" || "$latest_release" == "$current_version" ]]; then
+                echo "No update needed. The current version is up to date."
+                exit 0
+            fi
+
+            echo "Update needed. The current version is outdated."
+
+            echo "upstream_version=$latest_release" >> $GITHUB_ENV
+            echo "latest_release=$latest_release" >> $GITHUB_ENV
+            echo "has_update=true" >> $GITHUB_ENV
+        
+        - name: Notify about new version
+          if: env.has_update == 'true'
+          uses: actions/github-script@v7
+          with:
+            script: |
+                const version = "${{ env.upstream_version }}";
+                await github.rest.issues.create({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    title: `New upstream version for onekey-wallet-bin: ${version}`,
+                    body: `@olwig\n\nNew version found: **${version}**\n\nPlease update the SPEC for \`onekey-wallet-bin\`.`
+                });
