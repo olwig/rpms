@@ -1,7 +1,12 @@
-FROM registry.fedoraproject.org/fedora:44
+ARG FEDORA_VERSION=44
+FROM registry.fedoraproject.org/fedora:${FEDORA_VERSION}
 
-RUN dnf -y install mock rpm-build dnf-plugins-core rpmdevtools nano diffutils colordiff fish make
-RUN dnf -y clean all
+ARG FEDORA_VERSION
+
+RUN dnf -y install mock rpm-build spectool dnf-plugins-core \
+	rpmdevtools nano diffutils colordiff fish make
+
+#RUN dnf -y clean all
 
 RUN cat >> /etc/dnf/dnf.conf <<-'EOF'
 	[main]
@@ -18,6 +23,8 @@ RUN cat >> /etc/mock/site-defaults.cfg <<-'EOF'
 	config_opts['resultdir'] = '/work/out'
 	config_opts['macros']['%_smp_mflags'] = '-j%{?_smp_build_ncpus}'
 EOF
+
+RUN echo "set -g fish_greeting \"=> Lets build rpms on ${FEDORA_VERSION}\"" >> /etc/fish/config.fish
 
 WORKDIR /work
 
