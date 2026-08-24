@@ -4,7 +4,7 @@ name: check-upstream
 
 on:
   schedule:
-    - cron: '11 */6 * * *' # every day at midnight
+    - cron: '0 */12 * * *' # every day at midnight
 
   workflow_dispatch:
 
@@ -36,8 +36,7 @@ jobs:
             repo="app-monorepo"
             pkg_name="onekey-wallet-bin"
 
-            #latest_release=$(curl https://api.github.com/repos/$owner/$repo/releases/latest | jq -r '.name')
-            latest_release="6.6.0"
+            latest_release=$(curl -s https://api.github.com/repos/$owner/$repo/releases/latest | jq -r '.name')
             echo "Latest release of $pkg_name: $latest_release"
 
             # get current version of onekey-wallet in the repo
