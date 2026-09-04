@@ -1,0 +1,108 @@
+name: trigger-copr-build-if-needed
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'repo/SPECS/*.spec'
+      - '.github/workflows/trigger-copr-build-if-needed.yml'
+  schedule:
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trigger-copr-build:
+    runs-on: ubuntu-latest
+    env:
+      COPR_CLI: /home/runner/.local/bin/copr-cli
+      COPR_OWNER: ${{ vars.COPR_OWNER || 'olafwriggers' }}
+      COPR_URL: https://copr.fedorainfracloud.org
+      COPR_USERNAME: ${{ secrets.COPR_USERNAME || vars.COPR_USERNAME || vars.COPR_OWNER || 'olafwriggers' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install copr-cli
+        run: python3 -m pip install --user copr-cli==2.6
+
+      - name: Trigger COPR builds when specs differ
+        env:
+          COPR_LOGIN: ${{ secrets.COPR_LOGIN }}
+          COPR_TOKEN: ${{ secrets.COPR_TOKEN }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          tmp_root="$(mktemp -d)"
+          trap 'rm -rf "$tmp_root"' EXIT
+
+          specs=(repo/SPECS/*.spec)
+          if [[ ${#specs[@]} -eq 0 ]]; then
+            echo "No spec files found."
+            exit 0
+          fi
+
+          builds_triggered=0
+
+          for local_spec in "${specs[@]}"; do
+            package_name="$(basename "${local_spec%.spec}")"
+            copr_project="${COPR_OWNER}/${package_name}"
+            package_json="$tmp_root/${package_name}.json"
+            build_dir="$tmp_root/${package_name}-build"
+
+            echo "Checking ${package_name} in ${copr_project}"
+
+            "${COPR_CLI}" get-package \
+              --name "${package_name}" \
+              --with-latest-succeeded-build \
+              --output-format json \
+              "${copr_project}" > "${package_json}"
+
+            build_id="$(jq -r '.latest_succeeded_build.id // empty' "${package_json}")"
+            if [[ -z "${build_id}" ]]; then
+              needs_build=1
+              reason="no successful COPR build exists yet"
+            else
+              mkdir -p "${build_dir}"
+              "${COPR_CLI}" download-build --dest "${build_dir}" --spec "${build_id}" >/dev/null
+
+              copr_spec="$(find "${build_dir}" -type f -name '*.spec' | head -n 1 || true)"
+              if [[ -z "${copr_spec}" ]]; then
+                needs_build=1
+                reason="unable to download the latest COPR spec for build ${build_id}"
+              elif cmp -s "${local_spec}" "${copr_spec}"; then
+                needs_build=0
+                reason="local spec matches latest successful COPR build ${build_id}"
+              else
+                needs_build=1
+                reason="local spec differs from latest successful COPR build ${build_id}"
+              fi
+            fi
+
+            echo "${reason}"
+            if [[ "${needs_build}" -eq 0 ]]; then
+              continue
+            fi
+
+            if [[ -z "${COPR_LOGIN}" || -z "${COPR_TOKEN}" ]]; then
+              echo "::error::COPR_LOGIN and COPR_TOKEN secrets must be configured before triggering builds."
+              exit 1
+            fi
+
+            mkdir -p "${HOME}/.config"
+            printf '%s\n' \
+              '[copr-cli]' \
+              "login = ${COPR_LOGIN}" \
+              "username = ${COPR_USERNAME}" \
+              "token = ${COPR_TOKEN}" \
+              "copr_url = ${COPR_URL}" > "${HOME}/.config/copr"
+
+            "${COPR_CLI}" build-package --nowait --name "${package_name}" "${copr_project}"
+            builds_triggered=$((builds_triggered + 1))
+          done
+
+          echo "Triggered ${builds_triggered} COPR build(s)."
