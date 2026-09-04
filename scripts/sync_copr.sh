@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 
-COPR_LOGIN=${COPR_LOGIN:-$1}
-COPR_USERNAME=${COPR_USERNAME:-$1}
-COPR_TOKEN=${COPR_TOKEN:-$2}
+
+# TODO check all relevantze errors
+# TODO incrase echos, snce is running in runner, the more the better
+# TODO check that all relevant env vars are set and seem valid
+
+set -euo pipefail
+
+COPR_LOGIN=${COPR_LOGIN:-}
+COPR_USERNAME=${COPR_USERNAME:-}
+COPR_TOKEN=${COPR_TOKEN:-}
 COPR_URL=${COPR_URL:-https://copr.fedorainfracloud.org}
 
 COPR_PROJECT=${COPR_PROJECT:-onekey-wallet-bin}
@@ -16,12 +23,6 @@ DRY_RUN=${DRY_RUN:-true}
 
 work_dir=$(mktemp -d)
 
-
-work_dir=/tmp/stabletemphkg
-mkdir -p $work_dir
-
-rm -rf $work_dir/repo
-
 repo_dir="$work_dir/repo"
 copr_dir="$work_dir/copr"
 
@@ -30,11 +31,24 @@ mkdir -p $copr_dir
 
 echo "Using work dir: $work_dir"
 
+cmds=(
+    "copr-cli"
+    "jq"
+    "git"
+)
 
-# write ~/.config/copr if not present
+for cmd in "${cmds[@]}"; do
+    if ! command -v $cmd &> /dev/null; then
+        echo "$cmd could not be found, please install it."
+        exit 1
+    fi
+done
+
+# ensure copr config exists
 if [[ ! -f ~/.config/copr ]]; then
+    echo "Copr config not found, creating from env's..."
     mkdir -p ~/.config
-    cat > ~/.config/copr <<-EOF
+    cat > ~/.config/copr <<EOF
 [copr-cli]
 login = $COPR_LOGIN
 username = $COPR_USERNAME
@@ -43,50 +57,73 @@ copr_url = $COPR_URL
 EOF
 fi
 
-# ping with copr-cli to test connectivity
 
-package=$(copr-cli get-package --name $COPR_PACKAGE --with-latest-succeeded-build $COPR_OWNER/$COPR_PROJECT)
+# get package information from copr
+package=
+if ! package=$(copr-cli get-package --name $COPR_PACKAGE --with-latest-succeeded-build $COPR_OWNER/$COPR_PROJECT); then
+    echo "Failed to get package information from copr."
+    exit 1
+fi
+
+echo
+echo "Package information:"
+echo "--------------------"
+jq . <<< "$package"
+
+# fetch relevant information from the package JSON
 build_id=$(echo $package | jq -r '.latest_succeeded_build.id')
 chroot=$(echo $package | jq -r '.latest_succeeded_build.chroots[]' | grep '^fedora-[0-9]\+-x86_64$' | sort -r | head -n 1)
 repo_url=$(echo $package | jq -r '.source_dict.clone_url')
 _repo_spec_file=$(echo $package | jq -r '.source_dict.spec')
 
-# besure the repo in copr is mine
+# be sure the repo in copr is mine
 if [[ "$repo_url" != "$GITHUB_URL" ]]; then
     echo "Repo URL $repo_url does not match expected $GITHUB_URL"
     exit 1
 fi
 
-#git clone $repo_url $repo_dir
-
+# justg get spec, clone not needed
 repo_spec_file="$repo_dir/$(basename $_repo_spec_file)"
-curl -fsSL -o $repo_spec_file "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/$_repo_spec_file"
+if ! curl -fsSL -o $repo_spec_file "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/$_repo_spec_file"; then
+    echo "Failed to download spec file from repo."
+    exit 1
+fi
+
+# downloaed spec must be present
+if [[ ! -f "$repo_spec_file" ]]; then
+    echo "Spec file $repo_spec_file does not exist."
+    exit 1
+fi
 
 
-
+echo
 echo "Build ID: $build_id"
 echo "Chroot: $chroot"
 echo "Repo spec file: $repo_spec_file"
 
-
+# get spec from copr build
+echo
 copr-cli download-build --chroot $chroot --spec $build_id --dest $copr_dir
-
 copr_spec_file="$copr_dir/$chroot/$COPR_PROJECT.spec"
 
+echo 
+echo "Comparing spec file:"
+echo "--------------------------"
+echo "Repo spec file: $repo_spec_file"
 echo "Copr spec file: $copr_spec_file"
-
-#echo "amek diff" >> $copr_spec_file
 
 
 # compare the spec files
-diff=$(diff $repo_spec_file $copr_spec_file)
-if [[ $? -eq 0 && -z "$diff" ]]; then
+if diff "$repo_spec_file" "$copr_spec_file" > /dev/null; then
     echo "No changes in spec file, exiting."
     exit 0
 fi
 echo "Spec file changed, building package in copr..."
 
+echo
 if [[ "$DRY_RUN" != "true" ]]; then
+    echo "Building package in copr ..."
+
     copr-cli build-package --name $COPR_PACKAGE $COPR_OWNER/$COPR_PROJECT
 else
     echo "Dry run: would have built package in copr."
