@@ -21,7 +21,8 @@ jobs:
       COPR_CLI: /home/runner/.local/bin/copr-cli
       COPR_OWNER: ${{ vars.COPR_OWNER || 'olafwriggers' }}
       COPR_URL: https://copr.fedorainfracloud.org
-      COPR_USERNAME: ${{ secrets.COPR_USERNAME || vars.COPR_USERNAME || vars.COPR_OWNER || 'olafwriggers' }}
+      COPR_USERNAME: ${{ vars.COPR_USERNAME || vars.COPR_OWNER || 'olafwriggers' }}
+      SCM_CLONE_URL: ${{ github.server_url }}/${{ github.repository }}.git
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -33,12 +34,17 @@ jobs:
         env:
           COPR_LOGIN: ${{ secrets.COPR_LOGIN }}
           COPR_TOKEN: ${{ secrets.COPR_TOKEN }}
+          COPR_USERNAME_SECRET: ${{ secrets.COPR_USERNAME }}
+          GITHUB_EVENT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           shopt -s nullglob
 
           tmp_root="$(mktemp -d)"
           trap 'rm -rf "$tmp_root"' EXIT
+          copr_username="${COPR_USERNAME_SECRET:-$COPR_USERNAME}"
+          scm_branch="${GITHUB_EVENT_DEFAULT_BRANCH:-${GITHUB_REF_NAME}}"
+          scm_committish="${scm_branch}"
 
           specs=(repo/SPECS/*.spec)
           if [[ ${#specs[@]} -eq 0 ]]; then
@@ -48,6 +54,31 @@ jobs:
 
           builds_triggered=0
 
+          configure_copr_cli() {
+            mkdir -p "${HOME}/.config"
+            {
+              printf '%s\n' \
+              '[copr-cli]' \
+              "username = ${copr_username}" \
+              "copr_url = ${COPR_URL}"
+
+              if [[ -n "${COPR_LOGIN:-}" && -n "${COPR_TOKEN:-}" ]]; then
+                printf '%s\n' \
+                  "login = ${COPR_LOGIN}" \
+                  "token = ${COPR_TOKEN}"
+              fi
+            } > "${HOME}/.config/copr"
+          }
+
+          require_copr_auth() {
+            if [[ -z "${COPR_LOGIN:-}" || -z "${COPR_TOKEN:-}" ]]; then
+              echo "::error::COPR_LOGIN and COPR_TOKEN secrets must be configured before triggering builds."
+              exit 1
+            fi
+          }
+
+          configure_copr_cli
+
           for local_spec in "${specs[@]}"; do
             package_name="$(basename "${local_spec%.spec}")"
             copr_project="${COPR_OWNER}/${package_name}"
@@ -56,30 +87,94 @@ jobs:
 
             echo "Checking ${package_name} in ${copr_project}"
 
-            "${COPR_CLI}" get-package \
-              --name "${package_name}" \
-              --with-latest-succeeded-build \
-              --output-format json \
-              "${copr_project}" > "${package_json}"
+            package_state="$(
+              printf '%s\n' \
+                'import json' \
+                'import os' \
+                'import urllib.parse' \
+                'import urllib.request' \
+                'from urllib.error import HTTPError, URLError' \
+                '' \
+                'params = urllib.parse.urlencode({' \
+                '    "ownername": os.environ["COPR_OWNER"],' \
+                '    "projectname": os.environ["PACKAGE_NAME"],' \
+                '    "packagename": os.environ["PACKAGE_NAME"],' \
+                '    "with_latest_succeeded_build": "True",' \
+                '})' \
+                'url = os.environ["COPR_URL"].rstrip("/") + "/api_3/package?" + params' \
+                '' \
+                'try:' \
+                '    with urllib.request.urlopen(url) as response:' \
+                '        payload = json.load(response)' \
+                '    with open(os.environ["PACKAGE_JSON"], "w", encoding="utf-8") as handle:' \
+                '        json.dump(payload, handle)' \
+                '    print("ok")' \
+                'except HTTPError as error:' \
+                '    if error.code == 404:' \
+                '        print("missing")' \
+                '    else:' \
+                '        print(f"http-error:{error.code}")' \
+                'except URLError:' \
+                '    print("network-error")' \
+              | PACKAGE_NAME="${package_name}" PACKAGE_JSON="${package_json}" python3
+            )"
 
-            build_id="$(jq -r '.latest_succeeded_build.id // empty' "${package_json}")"
-            if [[ -z "${build_id}" ]]; then
+            if [[ "${package_state}" == "missing" ]]; then
+              require_copr_auth
+              "${COPR_CLI}" add-package-scm \
+                --name "${package_name}" \
+                --clone-url "${SCM_CLONE_URL}" \
+                --commit "${scm_committish}" \
+                --subdir repo \
+                --spec "SPECS/${package_name}.spec" \
+                --method make_srpm \
+                "${copr_project}"
               needs_build=1
-              reason="no successful COPR build exists yet"
+              reason="package did not exist in COPR and was added from this repository"
+            elif [[ "${package_state}" != "ok" ]]; then
+              echo "::error::Unable to read package metadata for ${copr_project} (${package_state})."
+              exit 1
             else
-              mkdir -p "${build_dir}"
-              "${COPR_CLI}" download-build --dest "${build_dir}" --spec "${build_id}" >/dev/null
-
-              copr_spec="$(find "${build_dir}" -type f -name '*.spec' | head -n 1 || true)"
-              if [[ -z "${copr_spec}" ]]; then
+              build_id="$(
+                printf '%s\n' \
+                  'import json' \
+                  'import os' \
+                  'with open(os.environ["PACKAGE_JSON"], encoding="utf-8") as handle:' \
+                  '    payload = json.load(handle)' \
+                  'print(payload.get("builds", {}).get("latest_succeeded", {}).get("id", ""))' \
+                | PACKAGE_JSON="${package_json}" python3
+              )"
+              if [[ -z "${build_id}" ]]; then
                 needs_build=1
-                reason="unable to download the latest COPR spec for build ${build_id}"
-              elif cmp -s "${local_spec}" "${copr_spec}"; then
-                needs_build=0
-                reason="local spec matches latest successful COPR build ${build_id}"
+                reason="no successful COPR build exists yet"
               else
-                needs_build=1
-                reason="local spec differs from latest successful COPR build ${build_id}"
+                mkdir -p "${build_dir}"
+                if "${COPR_CLI}" download-build --dest "${build_dir}" "${build_id}" --spec >/dev/null; then
+                  found_spec=0
+                  matching_spec=0
+
+                  while IFS= read -r -d '' copr_spec; do
+                    found_spec=1
+                    if cmp -s "${local_spec}" "${copr_spec}"; then
+                      matching_spec=1
+                      break
+                    fi
+                  done < <(find "${build_dir}" -type f -name '*.spec' -print0)
+
+                  if [[ "${found_spec}" -eq 0 ]]; then
+                    needs_build=1
+                    reason="unable to download the latest COPR spec for build ${build_id}"
+                  elif [[ "${matching_spec}" -eq 1 ]]; then
+                    needs_build=0
+                    reason="local spec matches latest successful COPR build ${build_id}"
+                  else
+                    needs_build=1
+                    reason="local spec differs from latest successful COPR build ${build_id}"
+                  fi
+                else
+                  needs_build=1
+                  reason="unable to download the latest COPR spec for build ${build_id}"
+                fi
               fi
             fi
 
@@ -88,19 +183,7 @@ jobs:
               continue
             fi
 
-            if [[ -z "${COPR_LOGIN}" || -z "${COPR_TOKEN}" ]]; then
-              echo "::error::COPR_LOGIN and COPR_TOKEN secrets must be configured before triggering builds."
-              exit 1
-            fi
-
-            mkdir -p "${HOME}/.config"
-            printf '%s\n' \
-              '[copr-cli]' \
-              "login = ${COPR_LOGIN}" \
-              "username = ${COPR_USERNAME}" \
-              "token = ${COPR_TOKEN}" \
-              "copr_url = ${COPR_URL}" > "${HOME}/.config/copr"
-
+            require_copr_auth
             "${COPR_CLI}" build-package --nowait --name "${package_name}" "${copr_project}"
             builds_triggered=$((builds_triggered + 1))
           done
