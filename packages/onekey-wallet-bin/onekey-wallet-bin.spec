@@ -54,8 +54,9 @@ curl -fsSL --retry 3 --retry-delay 5 \
   "https://keys.openpgp.org/vks/v1/by-fingerprint/EB68AE544F1FDD8CD264624FB369A67A90BF387B" \
   -o onekey-wallet-signing-key.asc
 key_info="$(gpg --show-keys --with-colons onekey-wallet-signing-key.asc)"
+primary_fpr="$(printf '%s\n' "$key_info" | awk -F: '$1=="pub"{in_pub=1;next} in_pub && $1=="fpr"{print $10;exit}')"
 if [ "$(printf '%s\n' "$key_info" | grep -c '^pub:')" -ne 1 ] || \
-   ! printf '%s\n' "$key_info" | sed -n 's/^fpr:::::::::\([A-F0-9]*\):$/\1/p' | head -n 1 | grep -qx "EB68AE544F1FDD8CD264624FB369A67A90BF387B"; then
+   [ "$primary_fpr" != "EB68AE544F1FDD8CD264624FB369A67A90BF387B" ]; then
     echo "GPG key fingerprint validation failed!"
     exit 1
 fi
