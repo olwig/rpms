@@ -40,7 +40,7 @@ jobs:
             echo "Latest release of $pkg_name: $latest_release"
 
             # get current version of onekey-wallet in the repo
-            current_version=$(awk '/^Version:/ {print $2}' repo/SPECS/$pkg_name.spec)
+            current_version=$(awk '/^Version:/ {print $2}' packages/onekey-wallet-bin/$pkg_name.spec)
             echo "Current version of $pkg_name in the repo: $current_version"
 
             # compare versions

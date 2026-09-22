@@ -16,7 +16,7 @@ I also use this repository to get in touch with Copilot and AI tools in general,
 
 ## How to use it
 
-- package definitions live in `repo/SPECS/`
+- package definitions live in `packages/onekey-wallet-bin/`
 - COPR helper files live in `.copr/`
 - to inspect or update a package, start with its `.spec` file
 - to build an SRPM for COPR, use the target from `.copr/Makefile`
