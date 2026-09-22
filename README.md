@@ -12,8 +12,6 @@ At the moment it includes:
 - testing building packages for COPR
 - tracking upstream releases with the GitHub Actions
 
-I also use this repository to get in touch with Copilot and AI tools in general, and to learn how to work with them in a real project.
-
 ## How to use it
 
 - package definitions live in `packages/onekey-wallet-bin/`
