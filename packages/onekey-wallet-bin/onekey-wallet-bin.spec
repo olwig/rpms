@@ -53,8 +53,7 @@ cp %{src_appimage} .
 curl -fsSL --retry 3 --retry-delay 5 \
   "https://keys.openpgp.org/vks/v1/by-fingerprint/EB68AE544F1FDD8CD264624FB369A67A90BF387B" \
   -o onekey-wallet-signing-key.asc
-gpg --show-keys --with-colons onekey-wallet-signing-key.asc | grep -q "^fpr:::::::::EB68AE544F1FDD8CD264624FB369A67A90BF387B:$"
-if [ $? -ne 0 ]; then
+if ! gpg --show-keys --with-colons onekey-wallet-signing-key.asc | grep -q "^fpr:::::::::EB68AE544F1FDD8CD264624FB369A67A90BF387B:$"; then
     echo "GPG key fingerprint validation failed!"
     exit 1
 fi
