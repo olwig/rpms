@@ -1,6 +1,6 @@
 Name:           onekey-wallet-bin
 Version:        6.6.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Secure, open-source crypto wallet based on Electron (prebuilt AppImage)
 
 License:        Apache-2.0
@@ -50,7 +50,17 @@ Secure, open source and community-driven crypto wallet. This version uses the of
 cp %{src_appimage} .
 
 # validate data
-gpg --keyserver keys.openpgp.org --recv-keys EB68AE544F1FDD8CD264624FB369A67A90BF387B
+curl -fsSL --retry 3 --retry-delay 5 \
+  "https://keys.openpgp.org/vks/v1/by-fingerprint/EB68AE544F1FDD8CD264624FB369A67A90BF387B" \
+  -o onekey-wallet-signing-key.asc
+key_info="$(gpg --show-keys --with-colons onekey-wallet-signing-key.asc)"
+primary_fpr="$(printf '%s\n' "$key_info" | awk -F: '$1=="pub"{in_pub=1;next} in_pub && $1=="fpr"{print $10;exit}')"
+if [ "$(printf '%s\n' "$key_info" | grep -c '^pub:')" -ne 1 ] || \
+   [ "$primary_fpr" != "EB68AE544F1FDD8CD264624FB369A67A90BF387B" ]; then
+    echo "GPG key fingerprint validation failed!"
+    exit 1
+fi
+gpg --import onekey-wallet-signing-key.asc
 gpg --decrypt "%{src_asc}" > "%{src_appimage}.SHA256SUMS"
 if [ $? -ne 0 ]; then
     echo "GPG validation failed!"
@@ -115,6 +125,9 @@ fi
 /usr/share/icons/hicolor/512x512/apps/%{_name}.png
 
 %changelog
+* Tue Sep 22 2026 Olaf Wriggers <olaf@olwig.xyz> - 6.6.0-2
+- Fetch signing key via HTTPS VKS API instead of HKP keyserver
+
 * Tue Sep 22 2026 Olaf Wriggers <olaf@olwig.xyz> - 6.6.0-1
 - Update to v6.6.0
 
