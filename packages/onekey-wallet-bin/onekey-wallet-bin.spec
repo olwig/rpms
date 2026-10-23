@@ -1,5 +1,5 @@
 Name:           onekey-wallet-bin
-Version:        6.6.1
+Version:        6.6.3
 Release:        1%{?dist}
 Summary:        Secure, open-source crypto wallet based on Electron (prebuilt AppImage)
 
@@ -125,6 +125,9 @@ fi
 /usr/share/icons/hicolor/512x512/apps/%{_name}.png
 
 %changelog
+* Fri Oct 23 2026 Olaf Wriggers <olaf@olwig.xyz> - 6.6.3-1
+- Update to v6.6.3
+
 * Fri Oct 09 2026 Olaf Wriggers <olaf@olwig.xyz> - 6.6.1-1
 - Update to v6.6.1
 
